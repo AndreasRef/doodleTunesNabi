@@ -7,16 +7,21 @@
 #include "ofxGrt.h"
 #include "ofxCcv.h"
 #include "ofxOsc.h"
-
-#define HOST "localhost"
-#define PORT 9000
-
 using namespace ofxCv;
 using namespace cv;
 
+// where to send osc messages by default
+#define DEFAULT_OSC_DESTINATION "localhost"
+#define DEFAULT_OSC_ADDRESS "/classification"
+#define DEFAULT_OSC_PORT 9000
 
-const vector<string> classNames = {"drums", "bass guitar", "saxophone", "keyboard"};
-
+// instrument names
+const vector<string> classNames = {
+    "drums",
+    "bass guitar",
+    "saxophone",
+    "keyboard"
+};
 
 struct FoundSquare {
     ofImage img;
@@ -29,11 +34,12 @@ struct FoundSquare {
 class ofApp : public ofBaseApp
 {
 public:
+    
     void setup();
     void update();
     void draw();
     void exit();
-
+    
     void setTrainingLabel(int & label_);
     void addSamplesToTrainingSet();
     void gatherFoundSquares();
@@ -42,10 +48,10 @@ public:
     
     void addSamplesToTrainingSetNext();
     void classifyNext();
-
+    
     void save();
     void load();
-
+    
     int width, height;
     
     ofVideoGrabber cam;
@@ -55,27 +61,20 @@ public:
     ofxCvColorImage colorImage;
     
     ofxOscSender sender;
+    string oscDestination, oscAddress;
+    int oscPort;
     
     ofxPanel gui;
+    ofxToggle bRunning;
+    ofxButton bAdd, bTrain, bClassify, bSave, bLoad;
     ofParameter<float> minArea, maxArea, threshold;
-    ofParameter<bool> holes;
-    ofParameter<float> minArea2, maxArea2, threshold2;
-    ofParameter<bool> holes2;
     ofParameter<int> nDilate;
     ofParameter<int> trainingLabel;
-    ofxButton bAdd;
-    ofxButton bTrain;
-    ofxButton bClassify;
-    ofxButton bSave, bLoad;
-    ofxToggle bRunning;
-
+    
     vector<FoundSquare> foundSquares;
     
     ClassificationData trainingData;
     GestureRecognitionPipeline pipeline;
     ofxCcv ccv;
-    bool isTrained;
-    bool toAddSamples;
-    bool toClassify;
-
+    bool isTrained, toAddSamples, toClassify;
 };

@@ -21,7 +21,7 @@ void ofApp::setup(){
     
     cam.setDeviceID(0);
     cam.setup(width, height);
-    ccv.setup("image-net-2012.sqlite3");
+    ccv.setup(ofToDataPath("image-net-2012.sqlite3"));
     
     bAdd.addListener(this, &ofApp::addSamplesToTrainingSetNext);
     bTrain.addListener(this, &ofApp::trainClassifier);
@@ -30,22 +30,20 @@ void ofApp::setup(){
     bLoad.addListener(this, &ofApp::load);
     trainingLabel.addListener(this, &ofApp::setTrainingLabel);
     
-    sender.setup(HOST, PORT);
+    // default settings
+    oscDestination = DEFAULT_OSC_DESTINATION;
+    oscAddress = DEFAULT_OSC_ADDRESS;
+    oscPort = DEFAULT_OSC_PORT;
+    sender.setup(oscDestination, oscPort);
     
     gui.setup();
-    gui.setName("CV");
-    ofParameterGroup gCvInitial, gCvMerge;
-    gCvInitial.setName("CV initial");
-    gCvInitial.add(minArea.set("Min area", 10, 1, 100));
-    gCvInitial.add(maxArea.set("Max area", 200, 1, 500));
-    gCvInitial.add(threshold.set("Threshold", 128, 0, 255));
-    gCvInitial.add(holes.set("Holes", false));
-    gCvMerge.setName("CV merge");
-    gCvMerge.add(minArea2.set("Min area", 10, 1, 100));
-    gCvMerge.add(maxArea2.set("Max area", 200, 1, 500));
-    gCvMerge.add(threshold2.set("Threshold", 128, 0, 255));
-    gCvMerge.add(holes2.set("Holes", false));
-    gCvMerge.add(nDilate.set("Dilations", 1, 0, 8));
+    gui.setName("DoodleClassifier");
+    ofParameterGroup gCv;
+    gCv.setName("CV initial");
+    gCv.add(minArea.set("Min area", 10, 1, 100));
+    gCv.add(maxArea.set("Max area", 200, 1, 500));
+    gCv.add(threshold.set("Threshold", 128, 0, 255));
+    gCv.add(nDilate.set("Dilations", 1, 0, 8));
     gui.add(trainingLabel.set("Training Label", 0, 0, classNames.size()-1));
     gui.add(bAdd.setup("Add samples"));
     gui.add(bTrain.setup("Train"));
@@ -53,10 +51,9 @@ void ofApp::setup(){
     gui.add(bClassify.setup("Classify"));
     gui.add(bSave.setup("Save"));
     gui.add(bLoad.setup("Load"));
-    gui.add(gCvInitial);
-    gui.add(gCvMerge);
-    gui.setPosition(0, 0.75*height);
-    gui.loadFromFile("settings.xml");
+    gui.add(gCv);
+    gui.setPosition(0, 400);
+    gui.loadFromFile("cv_settings.xml");
     
     fbo.allocate(width, height);
     colorImage.allocate(width, height);
@@ -71,8 +68,6 @@ void ofApp::setup(){
     adaboost.setNullRejectionCoeff(3);
     pipeline.setClassifier(adaboost);
     
-    
-    //load on setup
     load();
 }
 
@@ -95,7 +90,7 @@ void ofApp::update(){
         contourFinder.setMaxAreaRadius(maxArea);
         contourFinder.setThreshold(127);
         contourFinder.findContours(grayImage);
-        contourFinder.setFindHoles(holes);
+        contourFinder.setFindHoles(true);
         
         // draw all contour bounding boxes to FBO
         fbo.begin();
@@ -116,11 +111,11 @@ void ofApp::update(){
         fbo.readToPixels(pixels);
         
         // find merged contours
-        contourFinder2.setMinAreaRadius(minArea2);
-        contourFinder2.setMaxAreaRadius(maxArea2);
-        contourFinder2.setThreshold(threshold2);
+        contourFinder2.setMinAreaRadius(minArea);
+        contourFinder2.setMaxAreaRadius(maxArea);
+        contourFinder2.setThreshold(127);
         contourFinder2.findContours(pixels);
-        contourFinder2.setFindHoles(holes2);
+        contourFinder2.setFindHoles(true);
         
         if (toAddSamples) {
             addSamplesToTrainingSet();
@@ -187,13 +182,11 @@ void ofApp::draw(){
     }
     ofPopMatrix();
     ofPopStyle();
-    
-    
 }
 
 //--------------------------------------------------------------
 void ofApp::exit() {
-    gui.saveToFile("settings.xml");
+    gui.saveToFile("cv_settings.xml");
 }
 
 //--------------------------------------------------------------
@@ -215,6 +208,7 @@ void ofApp::addSamplesToTrainingSet() {
     ofLog(OF_LOG_NOTICE, "Adding samples...");
     gatherFoundSquares();
     for (int i=0; i<foundSquares.size(); i++) {
+        foundSquares[i].label = trainingLabel;//classNames[trainingLabel];
         vector<float> encoding = ccv.encode(foundSquares[i].img, ccv.numLayers()-1);
         VectorFloat inputVector(encoding.size());
         for (int i=0; i<encoding.size(); i++) inputVector[i] = encoding[i];
@@ -227,15 +221,15 @@ void ofApp::addSamplesToTrainingSet() {
 void ofApp::trainClassifier() {
     ofLog(OF_LOG_NOTICE, "Training...");
     if (pipeline.train(trainingData)){
-        cout << "getNumClasses: " << pipeline.getNumClasses() << endl;
+        ofLog(OF_LOG_NOTICE, "getNumClasses: "+ofToString(pipeline.getNumClasses()));
     }
     isTrained = true;
     ofLog(OF_LOG_NOTICE, "Done training...");
 }
 
-
 //--------------------------------------------------------------
 void ofApp::classifyCurrentSamples() {
+    ofLog(OF_LOG_NOTICE, "Classifiying on frame "+ofToString(ofGetFrameNum()));
     int nInstruments = 4;
     vector<int>instrumentCount;
     vector<float>instrumentArea;
@@ -261,7 +255,6 @@ void ofApp::classifyCurrentSamples() {
         }
     }
     
-    
     //Send OSC messages to Ableton via liveOSC commands
     for (int i = 0; i<nInstruments; i++) {
         if (instrumentCount[i] > 0) {
@@ -274,14 +267,12 @@ void ofApp::classifyCurrentSamples() {
             sender.sendMessage(m, false);
             
             //Set the track volume based on size of the instruments
-            float trackVol = 0.75*instrumentArea[i]/maxArea; 
+            float trackVol = 0.75*instrumentArea[i]/maxArea;
             ofxOscMessage m2;
             m2.setAddress("/live/volume");
             m2.addIntArg(i);
             m2.addFloatArg(ofMap(trackVol,0,0.75,0.55,0.75));
             sender.sendMessage(m2, false);
-            
-            
         }
         else {
             ofxOscMessage m;
